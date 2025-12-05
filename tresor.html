@@ -1,0 +1,278 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>El Tesoro Oculto — NES Zelda Edition</title>
+
+<style>
+:root{
+  --accent:#ffd24d;
+  --text:#eaf6ff;
+  --muted:#9aa6b2;
+}
+/* Fondo general */
+html,body{
+  height:100%; margin:0;
+  font-family:system-ui,Arial,sans-serif;
+  background:#0e121a;
+  color:var(--text);
+  display:flex;align-items:center;justify-content:center
+}
+.wrap{width:920px;max-width:96%;padding:18px;text-align:center}
+/* Canvas principal */
+canvas{
+  background:#000;
+  border-radius:10px;
+  display:block;
+  margin:12px auto;
+  box-shadow:0 12px 40px rgba(0,0,0,0.6);
+  outline:0;
+  image-rendering:pixelated;
+}
+/* HUD */
+.hud{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:6px;flex-wrap:wrap}
+.hud-group{display:flex;gap:8px;align-items:center}
+.stats-box{background:rgba(255,255,255,0.08);padding:8px 12px;border-radius:6px;font-size:13px;}
+.stats-box strong{color:var(--accent)}
+/* Botones */
+button{
+  padding:8px 12px;
+  border-radius:8px;
+  border:0;background:var(--accent);
+  color:#101010;cursor:pointer;font-weight:600
+}
+button:hover{opacity:0.9}
+.msg{margin-top:8px;font-weight:700}
+/* Overlay final */
+#overlay{
+  position:fixed;inset:0;
+  display:flex;align-items:center;justify-content:center;
+  background:rgba(0,0,0,0.45);
+  visibility:hidden;z-index:100;
+}
+#overlay .card{
+  background:#fff;padding:24px 28px;
+  border-radius:10px;color:#111;font-weight:800;text-align:center
+}
+.time-display{color:#c28800;font-size:24px;margin-top:8px}
+.select-skin{
+  padding:6px 10px;border-radius:6px;
+  border:0;background:#1b2330;color:#fff;font-weight:bold;
+}
+</style>
+</head>
+
+<body>
+<div class="wrap">
+
+  <div class="hud">
+    <div>
+      <strong>El Tesoro Oculto — NES Edition</strong>
+      <div style="font-size:13px;color:var(--muted)">Usa ← ↑ → ↓ para moverte</div>
+    </div>
+
+    <div class="hud-group">
+      <div class="stats-box">Encontrados: <strong id="foundCount">0</strong></div>
+      <div class="stats-box">Mejor tiempo: <strong id="bestTime">--</strong></div>
+      <div class="stats-box">Tiempo actual: <strong id="currentTime">0:00</strong></div>
+    </div>
+
+    <div class="hud-group">
+      <select id="skinSelect" class="select-skin">
+        <option value="overworld">Overworld</option>
+        <option value="dungeon">Dungeon</option>
+        <option value="desert">Desert</option>
+      </select>
+      <button id="startBtn">Comenzar</button>
+      <button id="restartBtn">Reiniciar</button>
+    </div>
+  </div>
+
+  <canvas id="game" width="820" height="520" tabindex="0"></canvas>
+  <div class="msg" id="status">Pulsa "Comenzar" para jugar.</div>
+</div>
+
+<div id="overlay">
+  <div class="card">
+    <div id="overlayText">¡Has encontrado el tesoro! 🎉</div>
+    <div class="time-display" id="overlayTime"></div>
+    <p style="margin-top:12px;font-weight:bold;">Pulsa ESPACIO o ENTER para jugar otra vez</p>
+  </div>
+</div>
+
+<script>
+/*======= FONDO PIXELADO NES =======*/
+function createNESPattern(type){
+  const c=document.createElement("canvas");
+  const ctx=c.getContext("2d");
+  c.width=c.height=64;
+  let colors;
+  if(type==="overworld")colors=["#3ca143","#2d8537","#58c15c","#26752f"];
+  else if(type==="dungeon")colors=["#1d2b4a","#111c31","#243963","#162447"];
+  else colors=["#c9a448","#e8c86d","#b68f3d","#d9b556"];
+
+  for(let y=0;y<64;y+=8)
+    for(let x=0;x<64;x+=8){
+      ctx.fillStyle=colors[Math.floor(Math.random()*colors.length)];
+      ctx.fillRect(x,y,8,8);
+    }
+  return c;
+}
+
+const bgNES={
+  overworld:createNESPattern("overworld"),
+  dungeon:createNESPattern("dungeon"),
+  desert:createNESPattern("desert")
+};
+
+/*=============== JUEGO ===============*/
+(function(){
+const canvas=document.getElementById('game');
+const ctx=canvas.getContext('2d');
+const startBtn=document.getElementById('startBtn');
+const restartBtn=document.getElementById('restartBtn');
+const statusEl=document.getElementById('status');
+const overlay=document.getElementById('overlay');
+const overlayText=document.getElementById('overlayText');
+const overlayTime=document.getElementById('overlayTime');
+const foundCountEl=document.getElementById('foundCount');
+const bestTimeEl=document.getElementById('bestTime');
+const currentTimeEl=document.getElementById('currentTime');
+const skinSelect=document.getElementById('skinSelect');
+
+const W=canvas.width,H=canvas.height;
+const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+const rand=(a,b)=>a+Math.random()*(b-a);
+const dist=(a,b,c,d)=>Math.hypot(c-a,d-b);
+const format=s=>`${Math.floor(s/60)}:${(Math.floor(s%60)<10?"0":"")+Math.floor(s%60)}`;
+
+/*======= SPRITE JUGADOR (agrandado) =======*/
+const sprite=document.createElement("canvas");sprite.width=sprite.height=64;
+const sctx=sprite.getContext("2d");
+drawPlayer();
+function drawPlayer(){
+  const c={skin:"#d4a574",brown:"#6b3a1f",dark:"#4a2410",green:"#7cb342",orange:"#ff9800"};
+  sctx.fillStyle=c.skin;sctx.fillRect(24,8,16,16);
+  sctx.fillStyle=c.green;sctx.fillRect(26,4,12,8);
+  sctx.fillStyle=c.dark;sctx.fillRect(28,14,3,3);sctx.fillRect(35,14,3,3);sctx.fillRect(31,17,2,2);
+  sctx.fillStyle=c.skin;sctx.fillRect(25,24,14,12);
+  sctx.fillStyle=c.brown;sctx.fillRect(25,24,14,8);
+  sctx.fillStyle=c.orange;sctx.fillRect(18,26,7,10);sctx.fillRect(39,26,7,10);
+  sctx.fillStyle=c.dark;sctx.fillRect(25,30,14,2);sctx.fillRect(25,36,14,8);
+  sctx.fillStyle=c.dark;sctx.fillRect(28,44,6,12);sctx.fillRect(30,44,6,12);
+  sctx.fillStyle=c.orange;sctx.fillRect(30,25,4,2);sctx.fillRect(31,24,2,4);
+}
+
+/*======= ESTADÍSTICAS =======*/
+class Stats{
+  constructor(){this.load();}
+  load(){try{const d=JSON.parse(localStorage.getItem("treasureStats")||"{}");this.found=d.found||0;this.best=d.best||null;}catch{this.found=0;this.best=null;}}
+  save(){localStorage.setItem("treasureStats",JSON.stringify({found:this.found,best:this.best}));}
+  record(t){this.found++;if(this.best===null||t<this.best)this.best=t;this.save();}
+}
+const stats=new Stats();
+const updateHUD=()=>{foundCountEl.textContent=stats.found;bestTimeEl.textContent=stats.best!==null?format(stats.best):"--";};
+updateHUD();
+
+/*======= INPUT =======*/
+class Input{constructor(){this.k={};onkeydown=e=>this.k[e.key]=1;onkeyup=e=>this.k[e.key]=0;}}
+
+/*======= JUGADOR =======*/
+class Player{
+  constructor(){this.x=W/2;this.y=H/2;this.r=26;this.speed=180;}
+  update(dt,i){
+    let dx=0,dy=0;
+    if(i.k.ArrowUp)dy--; if(i.k.ArrowDown)dy++;
+    if(i.k.ArrowLeft)dx--; if(i.k.ArrowRight)dx++;
+    if(dx||dy){let l=Math.hypot(dx,dy);dx/=l;dy/=l;}
+    this.x=clamp(this.x+dx*this.speed*dt,20,W-20);
+    this.y=clamp(this.y+dy*this.speed*dt,20,H-20);
+  }
+  draw(){ctx.drawImage(sprite,this.x-24,this.y-30,48,60);}
+}
+
+/*=================== TESORO — COFRE PIXELADO NES ==================*/
+class Treasure{
+  constructor(){
+    this.canvas=this.createChest();
+    this.respawn();
+  }
+  respawn(){this.x=rand(60,W-60);this.y=rand(60,H-60);}
+  hit(p){return dist(this.x,this.y,p.x,p.y)<=40;}
+  draw(){ctx.drawImage(this.canvas,this.x-32,this.y-32,64,64);}
+
+  createChest(){
+    const c=document.createElement("canvas");
+    c.width=c.height=64;
+    const t=c.getContext("2d");
+
+    const B="#5c3b1e",L="#a97b47",G="#f7d75c",S="#d4c15a",K="#2d1a0c";
+    const px=(x,y,col)=>{t.fillStyle=col;t.fillRect(x,y,4,4);};
+
+    // Tapa
+    for(let i=4;i<60;i+=4)px(i,8,B);
+    for(let i=8;i<56;i+=4)px(i,12,L);
+    for(let i=8;i<56;i+=4)px(i,16,B);
+
+    // Caja
+    for(let y=20;y<52;y+=4)
+      for(let x=10;x<54;x+=4)
+        px(x,y,(y%8==0)?L:B);
+
+    // Bordes
+    for(let i=4;i<60;i+=4){px(i,4,K);px(i,56,K);}
+    for(let i=4;i<60;i+=4){px(4,i,K);px(56,i,K);}
+
+    // Cierre con brillo
+    px(28,32,G);px(32,32,G);
+    px(28,36,S);px(32,36,S);
+
+    // Oro dentro
+    [20,24,28,32,36].forEach((x,i)=>px(x,20,i%2?S:G));
+
+    return c;
+  }
+}
+
+/*======= GAME =======*/
+class Game{
+  constructor(){this.in=new Input();this.p=new Player();this.t=new Treasure();this.run=false;this.s=0;}
+  start(){this.run=true;this.s=0;this.t0=Date.now();overlay.style.visibility="hidden";statusEl.textContent="¡Busca el tesoro!";this.loop();}
+  restart(){this.run=false;this.p=new Player();this.t=new Treasure();this.s=0;currentTimeEl.textContent="0:00";intro();}
+  loop(){
+    if(!this.run)return;
+    this.s=(Date.now()-this.t0)/1000;
+    currentTimeEl.textContent=format(this.s);
+    this.p.update(0.016,this.in);
+    if(this.t.hit(this.p)){
+      stats.record(this.s);updateHUD();
+      overlayText.textContent="¡Tesoro encontrado! 🎉";
+      overlayTime.textContent="Tiempo: "+format(this.s);
+      overlay.style.visibility="visible";
+      statusEl.textContent="Tesoro nº "+stats.found;this.run=false;
+    }
+    draw();requestAnimationFrame(()=>this.loop());
+  }
+}
+
+/*======= RENDER =======*/
+function bg(){ctx.fillStyle=ctx.createPattern(bgNES[skinSelect.value],"repeat");ctx.fillRect(0,0,W,H);}
+function intro(){bg();ctx.fillStyle="rgba(0,0,0,0.45)";ctx.fillRect(W/2-240,H/2-70,480,140);ctx.fillStyle="#fff";ctx.font="22px Arial";ctx.textAlign="center";ctx.fillText("El Tesoro Oculto — NES Edition",W/2,H/2-18);ctx.font="14px Arial";ctx.fillText("Pulsa Comenzar, ESPACIO o ENTER",W/2,H/2+18);}
+function draw(){bg();game.t.draw();game.p.draw();}
+
+const game=new Game();
+
+startBtn.onclick=()=>!game.run&&game.start();
+restartBtn.onclick=()=>game.restart();
+
+addEventListener("keydown",e=>{
+  if(!game.run&&overlay.style.visibility=="visible"&&(e.code=="Space"||e.code=="Enter")){overlay.style.visibility="hidden";game.restart();}
+  else if(!game.run&&(e.code=="Space"||e.code=="Enter"))game.start();
+});
+
+intro();
+})();
+</script>
+</body>
+</html>

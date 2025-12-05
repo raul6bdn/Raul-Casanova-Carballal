@@ -1,0 +1,468 @@
+<!DOCTYPE html>
+<html lang="ca">
+<head>
+	<meta charset="UTF-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<title>Joc de Fruites</title>
+	<style>
+		body {
+			background: #e0ffe0;
+			display: flex;
+			flex-direction: column;
+			align-items: center;
+			font-family: Arial, sans-serif;
+		}
+		canvas {
+			background: #fff;
+			border: 2px solid #333;
+			margin-top: 30px;
+		}
+		#gameOver {
+			font-size: 2em;
+			color: #d32f2f;
+			margin-top: 20px;
+			display: none;
+		}
+		#score {
+			font-size: 1.2em;
+			margin-top: 10px;
+		}
+
+		/* Pantalla de inicio */
+		#startScreen {
+			position: fixed;
+			top: 0;
+			left: 0;
+			width: 100%;
+			height: 100%;
+			display: flex;
+			align-items: center;
+			justify-content: center;
+			background: rgba(0,0,0,0.5);
+			z-index: 10;
+		}
+
+		#startCard {
+			background: #fffbe7;
+			padding: 24px 28px;
+			border-radius: 8px;
+			max-width: 420px;
+			text-align: center;
+			box-shadow: 0 6px 18px rgba(0,0,0,0.25);
+		}
+
+		#startCard p { margin: 8px 0; }
+		#startHint { margin-top: 12px; font-weight: bold; }
+
+		/* Resultats / Reinici */
+		#results {
+			position: fixed;
+			top: 0;
+			left: 0;
+			width: 100%;
+			height: 100%;
+			display: none;
+			align-items: center;
+			justify-content: center;
+			background: rgba(0,0,0,0.5);
+			z-index: 11;
+		}
+		#resultsCard {
+			background: #fffbe7;
+			padding: 20px 26px;
+			border-radius: 8px;
+			max-width: 480px;
+			text-align: left;
+			box-shadow: 0 6px 18px rgba(0,0,0,0.25);
+		}
+		#resultsCard h3 { margin-top: 0; text-align: center; }
+		#resultsList { margin: 12px 0 0 0; padding-left: 0; list-style: none; }
+		#resultsList li { margin: 8px 0; font-size: 1.05em; display:flex; align-items:center; }
+		.resultEmoji { font-size: 1.4em; width: 34px; display:inline-block; text-align:center; margin-right:8px; }
+		#restartBtn {
+			display: inline-block;
+			margin-top: 12px;
+			padding: 8px 14px;
+			background: #4caf50;
+			color: white;
+			border: none;
+			border-radius: 6px;
+			cursor: pointer;
+		}
+
+		/* Skins */
+		#skinControls { margin-top: 8px; display:flex; gap:8px; align-items:center; }
+		#skinsBtn { padding:6px 10px; border-radius:6px; border:1px solid #666; background:#f0f0f0; cursor:pointer; }
+		#skinPanel { display:none; background: #fffbe7; padding:8px; border-radius:6px; box-shadow:0 6px 12px rgba(0,0,0,0.15); }
+		#skinPanel button { margin:4px; padding:6px 10px; border-radius:6px; cursor:pointer; }
+
+		/* Dark skin */
+		body.skin-dark { background: #0f0f12; color: #e6e6e6; }
+		body.skin-dark canvas { background: #111; border-color: #444; }
+		body.skin-dark #startCard, body.skin-dark #resultsCard { background:#1a1a1a; color:#eee; }
+		body.skin-dark #startCard h2, body.skin-dark #startCard p { color: #eee; }
+
+		/* Retro skin */
+		body.skin-retro { background: #0b1b0b; color: #bfffbf; font-family: monospace; }
+		body.skin-retro canvas { background: #000; border-color: #0f9d58; image-rendering: pixelated; }
+		body.skin-retro #startCard, body.skin-retro #resultsCard { background:#001100; color:#bfffbf; border: 2px solid #0f9d58; }
+		body.skin-retro h1 { text-shadow: 1px 1px 0 #061; }
+
+	</style>
+</head>
+	<body>
+	<h1>Joc de Fruites</h1>
+	<div id="skinControls">
+		<button id="skinsBtn">Skins</button>
+		<div id="skinPanel">
+			<button data-skin="default">Default</button>
+			<button data-skin="dark">Dark</button>
+			<button data-skin="retro">Retro</button>
+		</div>
+	</div>
+		<!-- Pantalla de inicio -->
+		<div id="startScreen">
+			<div id="startCard">
+				<h2>¡Bienvenido al juego! 🍌🍎🍓</h2>
+				<p>🍌🍎 Recoge la fruta que cae para sumar puntos.</p>
+				<p>⚠️ Evita los objetos que no sean fruta: si los coges, pierdes 10 puntos.</p>
+				<p>🎉 ¡Intenta conseguir la mayor puntuación posible y diviértete!</p>
+				<p id="startHint">Pulsa la tecla <strong>Espacio</strong> para empezar</p>
+			</div>
+		</div>
+		<div id="score">Punts: 0 | Fruites perdudes: 0/10</div>
+	<div id="speed">Velocitat: 1.0x</div>
+	<canvas id="gameCanvas" width="400" height="600"></canvas>
+		<div id="gameOver">Fi del joc! Has perdut 10 fruites.</div>
+
+		<!-- Resultats i reinici -->
+		<div id="results">
+			<div id="resultsCard">
+				<h3>Resultats</h3>
+				<p id="finalPoints">Punts: 0</p>
+				<p id="finalSpeed">Velocitat final: 1.00x</p>
+				<ul id="resultsList"></ul>
+				<button id="restartBtn">Reiniciar</button>
+			</div>
+		</div>
+	<script>
+		const canvas = document.getElementById('gameCanvas');
+		const ctx = canvas.getContext('2d');
+		const scoreDiv = document.getElementById('score');
+		const gameOverDiv = document.getElementById('gameOver');
+
+		// Web Audio API para efectos de sonido
+		let audioContext = null;
+		function getAudioContext() {
+			if (!audioContext) {
+				audioContext = new (window.AudioContext || window.webkitAudioContext)();
+			}
+			return audioContext;
+		}
+
+		function playFruitSound() {
+			try {
+				const ctx_audio = getAudioContext();
+				const now = ctx_audio.currentTime;
+				const osc = ctx_audio.createOscillator();
+				const gain = ctx_audio.createGain();
+				osc.connect(gain);
+				gain.connect(ctx_audio.destination);
+				osc.frequency.setValueAtTime(400, now);
+				osc.frequency.exponentialRampToValueAtTime(600, now + 0.1);
+				gain.gain.setValueAtTime(0.3, now);
+				gain.gain.exponentialRampToValueAtTime(0.01, now + 0.1);
+				osc.start(now);
+				osc.stop(now + 0.1);
+			} catch (e) {
+				// Silenciosamente ignorar errores de audio
+			}
+		}
+
+		function playNegativeSound() {
+			try {
+				const ctx_audio = getAudioContext();
+				const now = ctx_audio.currentTime;
+				const osc = ctx_audio.createOscillator();
+				const gain = ctx_audio.createGain();
+				osc.connect(gain);
+				gain.connect(ctx_audio.destination);
+				osc.frequency.setValueAtTime(300, now);
+				osc.frequency.exponentialRampToValueAtTime(100, now + 0.2);
+				gain.gain.setValueAtTime(0.3, now);
+				gain.gain.exponentialRampToValueAtTime(0.01, now + 0.2);
+				osc.start(now);
+				osc.stop(now + 0.2);
+			} catch (e) {
+				// Silenciosamente ignorar errores de audio
+			}
+		}
+
+		const basket = {
+			x: 160,
+			y: 550,
+			width: 80,
+			height: 30,
+			speed: 7
+		};
+
+		const fruitTypes = [
+			{ color: 'red', emoji: '🍎', isBad: false, name: 'Manzana' },
+			{ color: 'yellow', emoji: '🍌', isBad: false, name: 'Plátano' },
+			{ color: 'orange', emoji: '🍊', isBad: false, name: 'Naranja' },
+			{ color: 'purple', emoji: '🍇', isBad: false, name: 'Uvas' },
+			{ color: 'green', emoji: '🥝', isBad: false, name: 'Kiwi' }
+		];
+		// Objectes negatius
+		const badObjects = [
+			{ emoji: '👟', isBad: true, name: 'Zapatilla' }, // Zapatilla desgastada
+			{ emoji: '💿', isBad: true, name: 'CD' }, // CD
+			{ emoji: '✈️', isBad: true, name: 'Avión de juguete' }, // Avión de juguete
+			{ emoji: '🧲', isBad: true, name: 'Imán' } // Imán (herradura metálica representada por imán)
+		];
+
+
+		let fruits = [];
+		let leftPressed = false;
+		let rightPressed = false;
+		let score = 0;
+		let missed = 0;
+		let gameOver = false;
+
+		let started = false;
+		let spawnIntervalId = null;
+
+		// Estadísticas de recogidos por tipo
+		const stats = {};
+		function resetStats() {
+			stats['Puntos negativos'] = 0;
+			for (let f of fruitTypes) stats[f.name] = 0;
+			for (let b of badObjects) stats[b.name] = 0;
+		}
+		resetStats();
+
+		// Velocitat de caiguda
+		let baseSpeed = 4;
+		let speed = baseSpeed;
+		let speedMultiplier = 1.0;
+		const speedDiv = document.getElementById('speed');
+
+		function drawBasket() {
+			// Ajusta la font segons el skin
+			if (currentSkin === 'retro') {
+				ctx.font = `${basket.height * 1.4}px monospace`;
+			} else {
+				ctx.font = `${basket.height * 1.7}px Arial`;
+			}
+			ctx.textAlign = 'left';
+			ctx.textBaseline = 'top';
+			ctx.fillText('🧺', basket.x, basket.y - basket.height * 0.15);
+		}
+
+		function drawFruit(fruit) {
+			// Ajusta la font segons el skin
+			if (currentSkin === 'retro') {
+				ctx.font = '28px monospace';
+			} else {
+				ctx.font = '32px Arial';
+			}
+			ctx.fillText(fruit.type.emoji, fruit.x, fruit.y);
+		}
+
+		function spawnFruit() {
+			// Limitar a 3 fruits/objects a la pantalla
+			if (fruits.length >= 3) return;
+			// 15% de probabilitat de objecte negatiu
+			let type;
+			if (Math.random() < 0.15) {
+				type = badObjects[Math.floor(Math.random() * badObjects.length)];
+			} else {
+				type = fruitTypes[Math.floor(Math.random() * fruitTypes.length)];
+			}
+			const x = Math.random() * (canvas.width - 32);
+			fruits.push({ x, y: -32, type, caught: false });
+		}
+
+		function updateFruits() {
+			for (let fruit of fruits) {
+				fruit.y += speed;
+			}
+			// Eliminar fruites/objectes atrapats o perduts
+			fruits = fruits.filter(fruit => {
+				// Comprovar si ha estat atrapada
+				if (
+					!fruit.caught &&
+					fruit.y + 28 >= basket.y &&
+					fruit.x + 28 > basket.x &&
+					fruit.x < basket.x + basket.width
+				) {
+					if (fruit.type.isBad) {
+						score -= 10;
+						if (score < 0) score = 0;
+						stats[fruit.type.name] = (stats[fruit.type.name] || 0) + 1;
+						stats['Puntos negativos'] += 1;
+						playNegativeSound();
+					} else {
+						score++;
+						stats[fruit.type.name] = (stats[fruit.type.name] || 0) + 1;
+						playFruitSound();
+					}
+					fruit.caught = true;
+					return false;
+				}
+				// Comprovar si ha caigut fora
+				if (fruit.y > canvas.height) {
+					if (!fruit.type.isBad) missed++;
+					return false;
+				}
+				return true;
+			});
+		}
+
+		function showResults() {
+			// Omplir dades
+			document.getElementById('finalPoints').textContent = `Punts: ${score}`;
+			document.getElementById('finalSpeed').textContent = `Velocitat final: ${speedMultiplier.toFixed(2)}x`;
+			const list = document.getElementById('resultsList');
+			list.innerHTML = '';
+			// Crear mapa de emojis por nombre
+			const emojiMap = {};
+			for (let f of fruitTypes) emojiMap[f.name] = f.emoji;
+			for (let b of badObjects) emojiMap[b.name] = b.emoji;
+			emojiMap['Puntos negativos'] = '⚠️';
+			// Mostrar solo los que tengan conteo > 0 y con emoji
+			for (let key in stats) {
+				if (!stats[key] || stats[key] <= 0) continue;
+				const li = document.createElement('li');
+				const spanEmoji = document.createElement('span');
+				spanEmoji.className = 'resultEmoji';
+				spanEmoji.textContent = emojiMap[key] || '';
+				li.appendChild(spanEmoji);
+				const spanText = document.createElement('span');
+				spanText.textContent = `${key}: ${stats[key]}`;
+				li.appendChild(spanText);
+				list.appendChild(li);
+			}
+			document.getElementById('results').style.display = 'flex';
+		}
+
+		function restartGame() {
+			// limpiar estado
+			if (spawnIntervalId) clearInterval(spawnIntervalId);
+			fruits = [];
+			leftPressed = false;
+			rightPressed = false;
+			score = 0;
+			missed = 0;
+			gameOver = false;
+			started = false;
+			speedMultiplier = 1.0;
+			speed = baseSpeed;
+			resetStats();
+			document.getElementById('results').style.display = 'none';
+			document.getElementById('startScreen').style.display = 'flex';
+			scoreDiv.textContent = `Punts: ${score} | Fruites perdudes: ${missed}/10`;
+			speedDiv.textContent = `Velocitat: ${speedMultiplier.toFixed(2)}x`;
+		}
+
+		function draw() {
+			ctx.clearRect(0, 0, canvas.width, canvas.height);
+			drawBasket();
+			for (let fruit of fruits) {
+				drawFruit(fruit);
+			}
+		}
+
+		function update() {
+			if (leftPressed) basket.x -= basket.speed;
+			if (rightPressed) basket.x += basket.speed;
+			basket.x = Math.max(0, Math.min(canvas.width - basket.width, basket.x));
+		}
+
+		function gameLoop() {
+			if (!started || gameOver) return;
+			// Augmenta la velocitat gradualment
+			speedMultiplier = 1 + (score + missed) * 0.03;
+			speed = baseSpeed * speedMultiplier;
+			update();
+			updateFruits();
+			draw();
+			scoreDiv.textContent = `Punts: ${score} | Fruites perdudes: ${missed}/10`;
+			speedDiv.textContent = `Velocitat: ${speedMultiplier.toFixed(2)}x`;
+			if (missed >= 10) {
+				gameOver = true;
+				// aturar spawn
+				if (spawnIntervalId) clearInterval(spawnIntervalId);
+				gameOverDiv.style.display = 'none';
+				showResults();
+				return;
+			}
+			requestAnimationFrame(gameLoop);
+		}
+
+		// Controls
+		document.addEventListener('keydown', e => {
+			// Iniciar amb Space
+			if (!started && (e.code === 'Space' || e.key === ' ')) {
+				e.preventDefault();
+				startGame();
+				return;
+			}
+			if (!started) return;
+			if (e.key === 'ArrowLeft') leftPressed = true;
+			if (e.key === 'ArrowRight') rightPressed = true;
+		});
+		document.addEventListener('keyup', e => {
+			if (!started) return;
+			if (e.key === 'ArrowLeft') leftPressed = false;
+			if (e.key === 'ArrowRight') rightPressed = false;
+		});
+
+		function startGame() {
+			if (started) return;
+			started = true;
+			document.getElementById('startScreen').style.display = 'none';
+			// iniciar spawn interval
+			spawnIntervalId = setInterval(() => {
+				if (!gameOver) spawnFruit();
+			}, 900);
+			// arrencar bucle
+			requestAnimationFrame(gameLoop);
+		}
+
+		// Skins logic
+		let currentSkin = 'default';
+		function applySkin(name) {
+			currentSkin = name || 'default';
+			// aplicar clase al body
+			document.body.classList.remove('skin-dark','skin-retro');
+			if (currentSkin === 'dark') document.body.classList.add('skin-dark');
+			if (currentSkin === 'retro') document.body.classList.add('skin-retro');
+			// canvas pixelated para retro
+			if (currentSkin === 'retro') {
+				canvas.style.imageRendering = 'pixelated';
+				if (ctx.imageSmoothingEnabled !== undefined) ctx.imageSmoothingEnabled = false;
+			} else {
+				canvas.style.imageRendering = '';
+				if (ctx.imageSmoothingEnabled !== undefined) ctx.imageSmoothingEnabled = true;
+			}
+		}
+
+		document.getElementById('skinsBtn').addEventListener('click', () => {
+			const panel = document.getElementById('skinPanel');
+			panel.style.display = panel.style.display === 'block' ? 'none' : 'block';
+		});
+		document.getElementById('skinPanel').addEventListener('click', (e) => {
+			if (e.target && e.target.dataset && e.target.dataset.skin) {
+				applySkin(e.target.dataset.skin);
+				document.getElementById('skinPanel').style.display = 'none';
+			}
+		});
+
+		document.getElementById('restartBtn').addEventListener('click', () => {
+			restartGame();
+		});
+
+	</script>
+</body>
+</html>

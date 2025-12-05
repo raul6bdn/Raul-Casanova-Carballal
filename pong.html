@@ -1,0 +1,1027 @@
+<!doctype html>
+<html lang="ca">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Pong senzill</title>
+  <style>
+    :root{--bg:#0b1220;--fg:#e6eef8;--accent:#39a0ff;--neon-cyan:#39f0ff;--neon-pink:#ff39d1}
+    html,body{height:100%;margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,"Helvetica Neue",Arial}
+    body{display:flex;align-items:center;justify-content:center;background:linear-gradient(180deg,#071023 0%,#081227 100%);color:var(--fg)}
+    .wrap{width:980px;max-width:95%;text-align:center;position:relative;padding:18px 30px}
+    canvas{display:block;margin:14px auto;background:#051028;border:2px solid rgba(255,255,255,0.06);box-shadow:0 8px 24px rgba(0,0,0,0.6); position:relative; z-index:0;}
+    .hud{display:flex;justify-content:space-between;align-items:center;color:var(--fg);margin-bottom:6px; position:relative; z-index:3;}
+    .score{font-size:20px}
+    .msg{font-size:18px;color:var(--accent)}
+    button, select {background:transparent;border:1px solid rgba(255,255,255,0.06);color:var(--fg);padding:8px 12px;border-radius:6px;cursor:pointer}
+    select, select option { color:#000 !important; background:#fff !important; }
+    select:focus { outline:2px solid rgba(0,0,0,0.08); }
+    .overlay{position:absolute;left:0;top:0;right:0;bottom:0;display:flex;align-items:center;justify-content:center;pointer-events:none}
+    .overlay p{background:rgba(5,10,20,0.75);padding:18px 26px;border-radius:10px;border:1px solid rgba(255,255,255,0.04)}
+    /* Big start banner */
+    #startBigOverlay { pointer-events: auto; z-index: 8; }
+    #startBigOverlay .card { padding:28px 36px; border-radius:12px; text-align:center; font-weight:700; font-size:26px; min-width:380px; box-shadow:0 12px 40px rgba(0,0,0,0.6); }
+    #startBigOverlay .card.small { font-size:18px; padding:16px 20px; min-width:260px; }
+
+    /* Goal banner */
+    #goalBanner { pointer-events:none; z-index:9; }
+    #goalBanner .goal-card { font-weight:900; font-size:72px; color:#ff1f1f; text-transform:uppercase; letter-spacing:4px; background:rgba(0,0,0,0.0); padding:0 18px; border-radius:8px; }
+
+    .controls {display:flex;gap:10px;align-items:center; position:relative; z-index:3;}
+    label {font-size:14px;margin-right:6px;color:var(--fg)}
+    .neon { box-shadow:0 0 18px rgba(57,240,255,0.12), inset 0 0 12px rgba(255,57,209,0.04); border:1px solid rgba(57,240,255,0.15); }
+
+    /* small helper to dim background when start visible */
+    .dim-canvas { filter: blur(0.6px) brightness(0.85); transition:filter 160ms ease; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="hud">
+      <div class="score">Jugador: <span id="playerScore">0</span></div>
+      <div class="msg">Punts fins a 11 — Fletxes amunt/avall per moure</div>
+      <div class="score">Oponent: <span id="opponentScore">0</span></div>
+    </div>
+
+    <div style="position:relative;">
+      <canvas id="game" width="900" height="500" tabindex="0"></canvas>
+
+      <!-- Big start overlay (visible al carregar) -->
+      <div id="startBigOverlay" class="overlay" style="display:flex;pointer-events:auto;">
+        <div class="card" id="startBigCard">Presiona espacio para comenzar</div>
+      </div>
+
+      <!-- Goal banner (visible temporalment per skin futbol) -->
+      <div id="goalBanner" class="overlay" style="display:none;pointer-events:none;">
+        <div class="goal-card" id="goalText">GOOOOOOL</div>
+      </div>
+
+      <div id="gameOverlay" class="overlay" style="display:none;pointer-events:none">
+        <p id="gameOverText"></p>
+      </div>
+    </div>
+
+    <div style="margin-top:10px; display:flex; justify-content:center; gap:10px; align-items:center;">
+      <div class="controls">
+        <label for="difficulty">Dificultat:</label>
+        <select id="difficulty">
+          <option value="facil">Fàcil</option>
+          <option value="normal" selected>Normal</option>
+          <option value="dificil">Difícil</option>
+        </select>
+      </div>
+
+      <div class="controls">
+        <label for="skin">Skin:</label>
+        <select id="skin">
+          <option value="moderna" selected>Moderna</option>
+          <option value="clasica">Clàssica (pixel)</option>
+          <option value="futurista">Futurista (neon)</option>
+          <option value="futbol">Futbol (camp)</option>
+          <option value="galaxia">Galàxia (espai)</option>
+          <option value="hacker">Hacker (verd)</option>
+        </select>
+      </div>
+
+      <div class="controls">
+        <label for="gameMode">Modo de joc:</label>
+        <select id="gameMode">
+          <option value="normal" selected>Normal</option>
+          <option value="poder">Modo Poder</option>
+          <option value="survival">Modo Survival</option>
+        </select>
+      </div>
+
+      <!-- NUEVO: selector multijugador independiente de los modos -->
+      <div class="controls">
+        <label for="multiplayer">Multijugador:</label>
+        <input type="checkbox" id="multiplayer" title="Jugador izquierdo: Flechas · Jugador derecho: W/S">
+      </div>
+
+      <button id="restart">Reinicia</button>
+      <div style="color:var(--fg);font-size:14px;margin-left:6px">Premeu <strong>P</strong> per pausar · Premeu <strong>R</strong> per reiniciar</div>
+    </div>
+  </div>
+
+  <script>
+    const canvas = document.getElementById('game');
+    const ctx = canvas.getContext('2d');
+
+    const playerScoreEl = document.getElementById('playerScore');
+    const opponentScoreEl = document.getElementById('opponentScore');
+    const overlay = document.getElementById('gameOverlay');
+    const gameOverText = document.getElementById('gameOverText');
+    const restartBtn = document.getElementById('restart');
+    const difficultyEl = document.getElementById('difficulty');
+    const skinEl = document.getElementById('skin');
+    const gameModeEl = document.getElementById('gameMode');
+    const startBigOverlay = document.getElementById('startBigOverlay');
+    const startBigCard = document.getElementById('startBigCard');
+    const goalBanner = document.getElementById('goalBanner');
+    const goalText = document.getElementById('goalText');
+    const multiplayerCheckbox = document.getElementById('multiplayer'); // NUEVO: checkbox
+
+    const W = canvas.width, H = canvas.height;
+
+    // Configuració
+    const paddleWidth = 12;
+    const paddleHeight = 90;
+    const paddleSpeed = 6;
+    let opponentMaxSpeed = 4.2;
+    let ballBaseSpeed = 5;
+    const ballRadius = 8;
+    const winningScore = 11;
+
+    // visual radius (para efecto visual sin alterar física)
+    let ballRadiusVisual = ballRadius;
+
+    let player = { x: 20, y: H/2 - paddleHeight/2, w: paddleWidth, h: paddleHeight, dy: 0 };
+    // Añadido dy para permitir control por teclado del segundo jugador
+    let opponent = { x: W - 20 - paddleWidth, y: H/2 - paddleHeight/2, w: paddleWidth, h: paddleHeight, dy: 0 };
+    let ball;
+    let playerScore = 0, opponentScore = 0;
+    // no empezar hasta que el usuario pulse espacio
+    let running = false;
+    let paused = false;
+    let animationId = null;
+    let skin = skinEl.value || 'moderna';
+
+    // NUEVO: estado multijugador (independiente de gameMode)
+    let multiplayerEnabled = false;
+
+    // GAME MODES
+    let survivalMode = false;
+    let survivalScore = 0;
+    let survivalSpeedIntervalId = null;
+    const SURVIVAL_SPEED_INTERVAL = 10000; // 10s
+    const SURVIVAL_SPEED_FACTOR = 1.08;
+
+    // Power-up mode
+    let powerUp = null;
+    let powerIntervalId = null;
+    let powerActive = null;
+    let storedPlayerH = null;
+    let storedBallVel = null;
+    const POWER_SPAWN_INTERVAL = 10000;
+    const POWER_DURATION = 5000;
+
+    // Offscreen buffer for pixel skin
+    const buf = document.createElement('canvas');
+    const bufW = 300;
+    const bufH = Math.round(bufW * H / W);
+    buf.width = bufW;
+    buf.height = bufH;
+    const bctx = buf.getContext('2d');
+    bctx.imageSmoothingEnabled = false;
+
+    // Particles for futurista skin
+    const particles = [];
+    function spawnParticle(x,y,color){
+      if (particles.length>150) particles.shift();
+      particles.push({
+        x, y,
+        vx: (Math.random()-0.5)*1.6,
+        vy: (Math.random()-0.5)*1.6,
+        life: Math.random()*40 + 30,
+        size: Math.random()*2 + 1,
+        color
+      });
+    }
+    function updateParticles(){
+      for (let i=particles.length-1;i>=0;i--){
+        const p = particles[i];
+        p.x += p.vx;
+        p.y += p.vy;
+        p.vx *= 0.99;
+        p.vy *= 0.99;
+        p.life -= 1;
+        if (p.life <= 0) particles.splice(i,1);
+      }
+    }
+    function drawParticles(ctxLocal){
+      for (const p of particles){
+        const alpha = Math.max(0, p.life/70);
+        ctxLocal.globalAlpha = alpha;
+        ctxLocal.fillStyle = p.color;
+        ctxLocal.beginPath();
+        ctxLocal.arc(p.x, p.y, p.size, 0, Math.PI*2);
+        ctxLocal.fill();
+      }
+      ctxLocal.globalAlpha = 1;
+    }
+
+    // Galaxia skin data
+    const stars = [];
+    let comet = { x: -200, y: H*0.3, vx: 4, trail: [] };
+    function initGalaxia() {
+      stars.length = 0;
+      for (let i=0;i<120;i++){
+        stars.push({
+          x: Math.random()*W,
+          y: Math.random()*H,
+          r: Math.random()*1.6 + 0.3,
+          phase: Math.random()*Math.PI*2,
+          tw: 0.01 + Math.random()*0.04
+        });
+      }
+      comet.x = -200;
+      comet.y = Math.random()*H*0.6 + H*0.2;
+      comet.vx = 3 + Math.random()*3;
+      comet.trail = [];
+    }
+    function updateGalaxia(){
+      for (const s of stars) s.phase += s.tw;
+      comet.x += comet.vx;
+      comet.y += Math.sin(comet.x * 0.01) * 0.8;
+      comet.trail.push({x: comet.x, y: comet.y, life: 40});
+      if (comet.trail.length>30) comet.trail.shift();
+      for (let i=comet.trail.length-1;i>=0;i--){
+        comet.trail[i].life--;
+        if (comet.trail[i].life<=0) comet.trail.splice(i,1);
+      }
+      if (comet.x > W + 100) {
+        comet.x = -200;
+        comet.y = Math.random()*H*0.6 + H*0.2;
+        comet.vx = 3 + Math.random()*3;
+        comet.trail = [];
+      }
+    }
+    function drawGalaxia(){
+      const g = ctx.createLinearGradient(0,0,0,H);
+      g.addColorStop(0,'#000114');
+      g.addColorStop(1,'#02021a');
+      ctx.fillStyle = g;
+      ctx.fillRect(0,0,W,H);
+
+      for (const s of stars){
+        const a = 0.4 + 0.6 * (0.5 + 0.5*Math.sin(s.phase));
+        ctx.globalAlpha = a;
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(Math.round(s.x), Math.round(s.y), Math.max(1, Math.round(s.r)), Math.max(1, Math.round(s.r)));
+      }
+      ctx.globalAlpha = 1;
+
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      for (let i=0;i<comet.trail.length;i++){
+        const t = comet.trail[i];
+        const alpha = (t.life/40) * 0.6;
+        ctx.globalAlpha = alpha;
+        ctx.fillStyle = 'rgba(255,200,120,0.9)';
+        const size = (i/comet.trail.length)*8 + 2;
+        ctx.beginPath();
+        ctx.arc(t.x, t.y, size, 0, Math.PI*2);
+        ctx.fill();
+      }
+      ctx.restore();
+
+      ctx.save();
+      ctx.globalAlpha = 0.06;
+      ctx.strokeStyle = '#39f0ff';
+      ctx.setLineDash([6,8]);
+      ctx.beginPath();
+      ctx.moveTo(W/2, 10);
+      ctx.lineTo(W/2, H-10);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.globalAlpha = 1;
+      ctx.restore();
+
+      ctx.fillStyle = '#fffbcc';
+      drawRoundedRectLocal(ctx, player.x, player.y, player.w, player.h, 6, true);
+      if (!survivalMode) drawRoundedRectLocal(ctx, opponent.x, opponent.y, opponent.w, opponent.h, 6, true);
+
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.fillStyle = 'rgba(120,200,255,0.9)';
+      ctx.beginPath();
+      ctx.arc(ball.x, ball.y, ballRadiusVisual * 1.3, 0, Math.PI*2);
+      ctx.fill();
+      ctx.fillStyle = 'rgba(200,120,255,0.95)';
+      ctx.beginPath();
+      ctx.arc(ball.x, ball.y, ballRadiusVisual * 0.6, 0, Math.PI*2);
+      ctx.fill();
+      ctx.restore();
+    }
+
+    // Hacker skin
+    const hackerCols = [];
+    let hackerFont = 14;
+    let hackerColsCount = 0;
+    let hackerRunning = false;
+
+    function initHacker() {
+      hackerCols.length = 0;
+      const w = W;
+      hackerFont = Math.max(10, Math.round(w / 80));
+      hackerColsCount = Math.floor(w / hackerFont) || 1;
+      for (let i = 0; i < hackerColsCount; i++) {
+        hackerCols.push({
+          y: -Math.floor(Math.random() * 100),
+          speed: 1 + Math.random() * 3,
+          length: 6 + Math.floor(Math.random() * 20)
+        });
+      }
+      hackerRunning = true;
+    }
+
+    function updateHacker() {
+      if (!hackerRunning) return;
+      for (const c of hackerCols) {
+        c.y += c.speed;
+        if (c.y - c.length * hackerFont > H && Math.random() > 0.96) {
+          c.y = -Math.floor(Math.random() * 50);
+          c.speed = 1 + Math.random() * 3;
+          c.length = 6 + Math.floor(Math.random() * 20);
+        }
+      }
+    }
+
+    function drawHacker() {
+      const g = ctx.createLinearGradient(0,0,0,H);
+      g.addColorStop(0,'#001000');
+      g.addColorStop(1,'#001e00');
+      ctx.fillStyle = g;
+      ctx.fillRect(0,0,W,H);
+
+      ctx.save();
+      ctx.globalAlpha = 0.03;
+      ctx.strokeStyle = '#00ff44';
+      for (let x=0;x<W;x+=40){
+        ctx.beginPath();
+        ctx.moveTo(x,0);
+        ctx.lineTo(x,H);
+        ctx.stroke();
+      }
+      for (let y=0;y<H;y+=40){
+        ctx.beginPath();
+        ctx.moveTo(0,y);
+        ctx.lineTo(W,y);
+        ctx.stroke();
+      }
+      ctx.restore();
+
+      ctx.font = `${hackerFont}px monospace`;
+      ctx.textBaseline = 'top';
+
+      for (let i = 0; i < hackerColsCount; i++) {
+        const c = hackerCols[i];
+        const x = i * hackerFont;
+        for (let k = 0; k < c.length; k++) {
+          const yy = Math.floor(c.y - k * hackerFont);
+          if (yy < -hackerFont || yy > H) continue;
+          if (k === 0) ctx.fillStyle = 'rgba(200,255,180,1)';
+          else if (k < 3) ctx.fillStyle = 'rgba(120,255,140,0.9)';
+          else ctx.fillStyle = 'rgba(40,160,60,0.6)';
+          ctx.fillText(Math.random() > 0.5 ? '1' : '0', x, yy);
+        }
+      }
+
+      ctx.fillStyle = '#bfffb0';
+      drawRoundedRectLocal(ctx, player.x, player.y, player.w, player.h, 6, true);
+      if (!survivalMode) drawRoundedRectLocal(ctx, opponent.x, opponent.y, opponent.w, opponent.h, 6, true);
+
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.fillStyle = 'rgba(170,255,150,0.95)';
+      ctx.beginPath();
+      ctx.arc(ball.x, ball.y, ballRadiusVisual*1.2, 0, Math.PI*2);
+      ctx.fill();
+      ctx.fillStyle = 'rgba(60,200,80,0.95)';
+      ctx.beginPath();
+      ctx.arc(ball.x, ball.y, ballRadiusVisual*0.6, 0, Math.PI*2);
+      ctx.fill();
+      ctx.restore();
+    }
+
+    function applyDifficulty(mode) {
+      if (mode === 'facil') {
+        opponentMaxSpeed = 3.2;
+        ballBaseSpeed = 4;
+      } else if (mode === 'normal') {
+        opponentMaxSpeed = 4.2;
+        ballBaseSpeed = 5;
+      } else if (mode === 'dificil') {
+        opponentMaxSpeed = 5.6;
+        ballBaseSpeed = 6.5;
+      }
+    }
+
+    // Big overlay skin (cambia color/estilo según skin)
+    function applyBigOverlaySkin(s) {
+      if (!startBigCard) return;
+      startBigCard.style.color = '#001';
+      startBigCard.style.background = 'rgba(8,10,14,0.9)';
+      startBigCard.classList.remove('small');
+      if (s === 'moderna') {
+        startBigCard.style.background = 'linear-gradient(90deg,#39a0ff,#5fc8ff)';
+        startBigCard.style.color = '#021024';
+      } else if (s === 'clasica') {
+        startBigCard.style.background = '#ffffff';
+        startBigCard.style.color = '#000000';
+        startBigCard.classList.add('small');
+      } else if (s === 'futurista') {
+        startBigCard.style.background = 'linear-gradient(90deg,#39f0ff,#ff39d1)';
+        startBigCard.style.color = '#021024';
+      } else if (s === 'galaxia') {
+        startBigCard.style.background = 'radial-gradient(circle at 30% 30%,#7ef0ff,#aaf0ff)';
+        startBigCard.style.color = '#001';
+      } else if (s === 'hacker') {
+        startBigCard.style.background = 'linear-gradient(90deg,#00ff44,#3fe85f)';
+        startBigCard.style.color = '#001';
+      } else if (s === 'futbol') {
+        startBigCard.style.background = 'linear-gradient(180deg,#2e7d32,#1b5e20)';
+        startBigCard.style.color = '#ffffff';
+      }
+    }
+
+    // POWER-UP functions
+    function spawnPowerUp() {
+      if (powerUp) return;
+      const margin = 60;
+      const x = Math.random() * (W - margin*2) + margin;
+      const y = Math.random() * (H - margin*2) + margin;
+      const size = 12 + Math.floor(Math.random() * 14);
+      const shape = Math.random() > 0.5 ? 'circle' : 'square';
+      const types = ['pad_large','pad_small','ball_fast','ball_bigvis'];
+      const type = types[Math.floor(Math.random()*types.length)];
+      const colorMap = { pad_large:'#3fe85f', pad_small:'#ff8c42', ball_fast:'#ffd24d', ball_bigvis:'#7ef0ff' };
+      powerUp = { x,y,size,shape,type,color:colorMap[type] || '#fff' };
+    }
+    function removePowerUp(){ powerUp = null; }
+    function showPowerText(text){
+      const prev = gameOverText.textContent;
+      gameOverText.textContent = text;
+      overlay.style.display = 'flex';
+      setTimeout(()=>{ overlay.style.display = 'none'; gameOverText.textContent = prev; }, 1200);
+    }
+    function applyPower(type){
+      clearActivePower();
+      powerActive = { type, expire: Date.now() + POWER_DURATION };
+      if (type === 'pad_large'){ storedPlayerH = player.h; player.h = Math.min(H, Math.round(player.h * 1.6)); }
+      else if (type === 'pad_small'){ storedPlayerH = player.h; player.h = Math.max(20, Math.round(player.h * 0.55)); }
+      else if (type === 'ball_fast'){ storedBallVel = {vx:ball.vx, vy:ball.vy}; const angle = Math.atan2(ball.vy, ball.vx); const speed = Math.hypot(ball.vx, ball.vy)*1.6; ball.vx = Math.cos(angle)*speed; ball.vy = Math.sin(angle)*speed; }
+      else if (type === 'ball_bigvis'){ ballRadiusVisual = Math.round(ballRadius * 1.8); }
+      showPowerText({pad_large:'Pala ampliada',pad_small:'Pala reduïda',ball_fast:'Pilota ràpida',ball_bigvis:'Pilota gegant'}[type] || 'Power!');
+      setTimeout(()=>{ if (powerActive && powerActive.type === type) clearActivePower(); }, POWER_DURATION + 50);
+    }
+    function clearActivePower(){
+      if (!powerActive) return;
+      const t = powerActive.type;
+      if (t === 'pad_large' || t === 'pad_small'){ if (storedPlayerH!=null){ player.h = storedPlayerH; storedPlayerH = null; } }
+      else if (t === 'ball_fast'){ if (storedBallVel){ ball.vx = storedBallVel.vx; ball.vy = storedBallVel.vy; storedBallVel = null; } }
+      else if (t === 'ball_bigvis'){ ballRadiusVisual = ballRadius; }
+      powerActive = null;
+    }
+    function drawPowerUp(){
+      if (!powerUp) return;
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.fillStyle = powerUp.color;
+      ctx.globalAlpha = 0.95;
+      const s = powerUp.size;
+      if (powerUp.shape === 'circle'){ ctx.beginPath(); ctx.arc(powerUp.x, powerUp.y, s, 0, Math.PI*2); ctx.fill(); }
+      else ctx.fillRect(powerUp.x - s, powerUp.y - s, s*2, s*2);
+      ctx.fillStyle = '#001000';
+      ctx.globalAlpha = 0.95;
+      ctx.font = `${Math.max(10, Math.round(s))}px monospace`;
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      const labelMap = { pad_large:'+', pad_small:'-', ball_fast:'>>', ball_bigvis:'O' };
+      ctx.fillText(labelMap[powerUp.type] || '?', powerUp.x, powerUp.y + 1);
+      ctx.restore();
+    }
+    function checkPowerCollision(){
+      if (!powerUp || !ball) return;
+      const px = powerUp.x, py = powerUp.y;
+      const r = ballRadius;
+      if (powerUp.shape === 'circle'){
+        const dx = ball.x - px, dy = ball.y - py;
+        if (Math.hypot(dx,dy) < r + powerUp.size){
+          const t = powerUp.type;
+          removePowerUp();
+          applyPower(t);
+        }
+      } else {
+        const half = powerUp.size;
+        if (ball.x + r > px - half && ball.x - r < px + half && ball.y + r > py - half && ball.y - r < py + half){
+          const t = powerUp.type;
+          removePowerUp();
+          applyPower(t);
+        }
+      }
+    }
+    function ensurePowerInterval(){
+      if (gameModeEl.value === 'poder'){
+        if (powerIntervalId == null){ spawnPowerUp(); powerIntervalId = setInterval(spawnPowerUp, POWER_SPAWN_INTERVAL); }
+      } else {
+        if (powerIntervalId != null){ clearInterval(powerIntervalId); powerIntervalId = null; }
+        removePowerUp();
+        clearActivePower();
+      }
+    }
+
+    function resetBall(scoredBy){
+      ball = { x: W/2, y: H/2, speed: ballBaseSpeed, angle: (Math.random()*Math.PI/4) - Math.PI/8 };
+      // direction logic: if survival mode, initial direction toward player (left)
+      let dir = (scoredBy === 'player' ? -1 : 1);
+      if (survivalMode) dir = -1;
+      const s = ball.speed;
+      ball.vx = s * Math.cos(ball.angle) * dir;
+      ball.vy = s * Math.sin(ball.angle) + (Math.random()*1.2 - 0.6);
+      ballRadiusVisual = ballRadius;
+    }
+
+    function startSurvivalMode(){
+      survivalMode = true;
+      survivalScore = 0;
+      // ensure ball moves left towards left wall/player
+      resetBall('opponent');
+      if (survivalSpeedIntervalId == null){
+        survivalSpeedIntervalId = setInterval(()=>{
+          if (!ball) return;
+          const ang = Math.atan2(ball.vy, ball.vx);
+          const sp = Math.hypot(ball.vx, ball.vy) * SURVIVAL_SPEED_FACTOR;
+          ball.vx = Math.cos(ang) * sp;
+          ball.vy = Math.sin(ang) * sp;
+        }, SURVIVAL_SPEED_INTERVAL);
+      }
+    }
+    function stopSurvivalMode(){
+      survivalMode = false;
+      if (survivalSpeedIntervalId != null){ clearInterval(survivalSpeedIntervalId); survivalSpeedIntervalId = null; }
+    }
+
+    function startGame(){
+      playerScore = 0; opponentScore = 0; survivalScore = 0;
+      updateScore();
+      applyDifficulty(difficultyEl.value);
+      skin = skinEl.value;
+      if (skin === 'galaxia') initGalaxia();
+      if (skin === 'hacker') initHacker();
+      // game mode setup
+      if (gameModeEl.value === 'survival') startSurvivalMode();
+      else stopSurvivalMode();
+      ensurePowerInterval();
+      resetBall('player');
+      running = true; paused = false;
+      overlay.style.display = 'none';
+      // hide start banner
+      if (startBigOverlay){ startBigOverlay.style.display = 'none'; startBigOverlay.style.pointerEvents = 'none'; }
+      // hide goal if visible
+      if (goalBanner) goalBanner.style.display = 'none';
+      // remove dim
+      canvas.classList.remove('dim-canvas');
+      loop();
+      try { canvas.focus(); } catch(e){}
+    }
+
+    function updateScore(){
+      playerScoreEl.textContent = survivalMode ? survivalScore : playerScore;
+      opponentScoreEl.textContent = opponentScore;
+    }
+
+    function drawRoundedRectLocal(ctxLocal, x,y,w,h,r,fill){
+      ctxLocal.beginPath();
+      ctxLocal.moveTo(x+r,y);
+      ctxLocal.arcTo(x+w,y,x+w,y+h,r);
+      ctxLocal.arcTo(x+w,y+h,x,y+h,r);
+      ctxLocal.arcTo(x,y+h,x,y,r);
+      ctxLocal.arcTo(x,y,x+w,y,r);
+      ctxLocal.closePath();
+      if (fill) ctxLocal.fill(); else ctxLocal.stroke();
+    }
+
+    function drawModern(){
+      ctx.fillStyle = '#051028';
+      ctx.fillRect(0,0,W,H);
+      ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+      ctx.setLineDash([8,8]);
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(W/2, 10);
+      ctx.lineTo(W/2, H-10);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = '#e6eef8';
+      drawRoundedRectLocal(ctx, player.x, player.y, player.w, player.h, 6, true);
+      if (!survivalMode) drawRoundedRectLocal(ctx, opponent.x, opponent.y, opponent.w, opponent.h, 6, true);
+      const r = (typeof ballRadiusVisual === 'number') ? ballRadiusVisual : ballRadius;
+      ctx.fillStyle = '#39a0ff';
+      ctx.beginPath();
+      ctx.arc(ball.x, ball.y, r, 0, Math.PI*2);
+      ctx.fill();
+    }
+
+    function drawClassicToBuffer(){
+      const scale = bufW / W;
+      bctx.fillStyle = '#000';
+      bctx.fillRect(0, 0, bufW, bufH);
+      bctx.fillStyle = '#4d4d4d';
+      const dashH = Math.max(1, Math.floor(8 * scale));
+      const gapH = Math.max(1, Math.floor(8 * scale));
+      let y = Math.floor(10 * scale);
+      const cx = Math.floor((W / 2) * scale);
+      while (y < bufH - Math.floor(10 * scale)) {
+        bctx.fillRect(cx - 1, y, 2, dashH);
+        y += dashH + gapH;
+      }
+
+      const px = Math.floor(player.x * scale), py = Math.floor(player.y * scale);
+      const ox = Math.floor(opponent.x * scale), oy = Math.floor(opponent.y * scale);
+      const pw = Math.max(2, Math.floor(player.w * scale)), ph = Math.max(4, Math.floor(player.h * scale));
+      const visualRadius = (typeof ballRadiusVisual === 'number') ? ballRadiusVisual : ballRadius;
+      const br = Math.max(1, Math.floor(visualRadius * scale));
+
+      bctx.fillStyle = '#fff';
+      bctx.fillRect(px, py, pw, ph);
+      if (!survivalMode) bctx.fillRect(ox, oy, pw, ph);
+      const bx = Math.floor(ball.x * scale) - br;
+      const by = Math.floor(ball.y * scale) - br;
+      bctx.fillRect(bx, by, br * 2, br * 2);
+    }
+
+    function drawFuturistic(){
+      ctx.fillStyle = '#020512';
+      ctx.fillRect(0,0,W,H);
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.strokeStyle = 'rgba(57,240,255,0.08)';
+      ctx.lineWidth = 6;
+      ctx.shadowBlur = 28;
+      ctx.shadowColor = 'rgba(57,240,255,0.18)';
+      ctx.beginPath();
+      ctx.moveTo(W/2, 0);
+      ctx.lineTo(W/2, H);
+      ctx.stroke();
+      ctx.restore();
+      ctx.save();
+      ctx.shadowBlur = 18;
+      ctx.shadowColor = 'rgba(255,57,209,0.35)';
+      ctx.fillStyle = '#071029';
+      drawRoundedRectLocal(ctx, player.x-2, player.y-2, player.w+4, player.h+4, 8, true);
+      ctx.shadowColor = 'rgba(57,240,255,0.45)';
+      ctx.fillStyle = 'rgba(57,240,255,0.08)';
+      drawRoundedRectLocal(ctx, player.x+1, player.y+1, player.w-2, player.h-2, 6, true);
+      if (!survivalMode) drawRoundedRectLocal(ctx, opponent.x-2, opponent.y-2, opponent.w+4, opponent.h+4, 8, true);
+      ctx.restore();
+      const colorA = 'rgba(57,240,255,0.9)';
+      const colorB = 'rgba(255,57,209,0.9)';
+      spawnParticle(ball.x, ball.y, Math.random()>0.5 ? colorA : colorB);
+      const r = (typeof ballRadiusVisual === 'number') ? ballRadiusVisual : ballRadius;
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.fillStyle = colorA;
+      ctx.shadowBlur = 30;
+      ctx.shadowColor = colorA;
+      ctx.beginPath();
+      ctx.arc(ball.x, ball.y, r * 1.1, 0, Math.PI*2);
+      ctx.fill();
+      ctx.fillStyle = colorB;
+      ctx.beginPath();
+      ctx.arc(ball.x, ball.y, r * 0.6, 0, Math.PI*2);
+      ctx.fill();
+      ctx.restore();
+      ctx.save();
+      ctx.globalAlpha = 0.03;
+      ctx.strokeStyle = '#39f0ff';
+      for (let i=0;i<10;i++){
+        ctx.beginPath();
+        ctx.moveTo(0, i*(H/10));
+        ctx.lineTo(W, i*(H/10));
+        ctx.stroke();
+      }
+      ctx.restore();
+      drawParticles(ctx);
+    }
+
+    // Draw simple football field
+    function drawFutbol(){
+      // green pitch
+      const g = ctx.createLinearGradient(0,0,0,H);
+      g.addColorStop(0,'#2e7d32');
+      g.addColorStop(1,'#1b5e20');
+      ctx.fillStyle = g;
+      ctx.fillRect(0,0,W,H);
+      // white markings
+      ctx.strokeStyle = 'rgba(255,255,255,0.95)';
+      ctx.lineWidth = 2;
+      // outer lines
+      ctx.strokeRect(12,12,W-24,H-24);
+      // center line
+      ctx.beginPath();
+      ctx.moveTo(W/2,12);
+      ctx.lineTo(W/2,H-12);
+      ctx.stroke();
+      // center circle
+      ctx.beginPath();
+      ctx.arc(W/2,H/2,60,0,Math.PI*2);
+      ctx.stroke();
+      // draw paddles and ball in white
+      ctx.fillStyle = '#ffffff';
+      drawRoundedRectLocal(ctx, player.x, player.y, player.w, player.h, 6, true);
+      if (!survivalMode) drawRoundedRectLocal(ctx, opponent.x, opponent.y, opponent.w, opponent.h, 6, true);
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath();
+      const r = (typeof ballRadiusVisual === 'number') ? ballRadiusVisual : ballRadius;
+      ctx.arc(ball.x, ball.y, r, 0, Math.PI*2);
+      ctx.fill();
+      ctx.restore();
+    }
+
+    function draw(){
+      if (skin === 'clasica'){
+        drawClassicToBuffer();
+        ctx.imageSmoothingEnabled = false;
+        ctx.clearRect(0,0,W,H);
+        ctx.drawImage(buf,0,0,W,H);
+        ctx.imageSmoothingEnabled = true;
+      } else if (skin === 'futurista') drawFuturistic();
+      else if (skin === 'galaxia') drawGalaxia();
+      else if (skin === 'hacker') drawHacker();
+      else if (skin === 'futbol') drawFutbol();
+      else drawModern();
+
+      // power-up render on top
+      if (gameModeEl.value === 'poder') drawPowerUp();
+    }
+
+    function clamp(v,a,b){ return Math.max(a, Math.min(b, v)); }
+
+    function update(){
+      if (!running || paused) return;
+
+      // player movement (controlled by arrows or wheel as before)
+      player.y += player.dy;
+      player.y = clamp(player.y, 0, H - player.h);
+
+      // opponent movement:
+      // - if multiplayer enabled -> opponent controlled by opponent.dy (W/S keys)
+      // - else (normal) -> AI moves the opponent (unless survival mode, where opponent is passive)
+      if (multiplayerEnabled){
+        opponent.y += opponent.dy;
+        opponent.y = clamp(opponent.y, 0, H - opponent.h);
+      } else {
+        if (!survivalMode){
+          const targetY = ball.y - opponent.h/2;
+          const diff = targetY - opponent.y;
+          opponent.y += clamp(diff, -opponentMaxSpeed, opponentMaxSpeed);
+          opponent.y = clamp(opponent.y, 0, H - opponent.h);
+        }
+      }
+
+      ball.x += ball.vx;
+      ball.y += ball.vy;
+
+      if (ball.y - ballRadius < 0){ ball.y = ballRadius; ball.vy = -ball.vy; }
+      else if (ball.y + ballRadius > H){ ball.y = H - ballRadius; ball.vy = -ball.vy; }
+
+      // power collision
+      if (gameModeEl.value === 'poder') checkPowerCollision();
+
+      // player paddle collision (always exists)
+      if (ball.x - ballRadius < player.x + player.w &&
+          ball.x - ballRadius > player.x &&
+          ball.y > player.y && ball.y < player.y + player.h) {
+        ball.x = player.x + player.w + ballRadius;
+        const relativeY = (ball.y - (player.y + player.h/2)) / (player.h/2);
+        const bounceAngle = relativeY * Math.PI/4;
+        const speedIncrease = 0.25;
+        const speed = Math.min(40, Math.hypot(ball.vx, ball.vy) + speedIncrease);
+        ball.vx = Math.abs(speed * Math.cos(bounceAngle));
+        ball.vy = speed * Math.sin(bounceAngle);
+
+        if (survivalMode){
+          survivalScore++;
+          updateScore();
+        }
+      }
+
+      // opponent paddle or right-wall in survival
+      if (!survivalMode){
+        if (ball.x + ballRadius > opponent.x &&
+            ball.x + ballRadius < opponent.x + opponent.w &&
+            ball.y > opponent.y && ball.y < opponent.y + opponent.h) {
+          ball.x = opponent.x - ballRadius;
+          const relativeY = (ball.y - (opponent.y + opponent.h/2)) / (opponent.h/2);
+          const bounceAngle = relativeY * Math.PI/4;
+          const speedIncrease = 0.25;
+          const speed = Math.min(12, Math.hypot(ball.vx, ball.vy) + speedIncrease);
+          ball.vx = -Math.abs(speed * Math.cos(bounceAngle));
+          ball.vy = speed * Math.sin(bounceAngle);
+        }
+      } else {
+        // survival: bounce on right wall
+        if (ball.x + ballRadius > W){
+          ball.x = W - ballRadius;
+          ball.vx = -Math.abs(ball.vx);
+        }
+      }
+
+      // left/right wall handling
+      if (!survivalMode){
+        if (ball.x + ballRadius < 0){
+          opponentScore++;
+          updateScore();
+          if (opponentScore >= winningScore) { endGame('Oponent guanya'); return; }
+          else { resetBall('opponent'); return; }
+        } else if (ball.x - ballRadius > W){
+          playerScore++;
+          // show GOAL banner only in futbol skin and when player scores
+          if (skin === 'futbol' && goalBanner && goalText) {
+            goalText.textContent = 'GOOOOOOL';
+            goalBanner.style.display = 'flex';
+            // ensure visible for 0.7s
+            setTimeout(()=>{ if (goalBanner) goalBanner.style.display = 'none'; }, 700);
+          }
+          updateScore();
+          if (playerScore >= winningScore) { endGame('Jugador guanya'); return; }
+          else { resetBall('player'); return; }
+        }
+      } else {
+        if (ball.x - ballRadius < 0){
+          endGame('Game Over — Puntuació: ' + survivalScore);
+          return;
+        }
+      }
+
+      if (skin === 'futurista') updateParticles();
+      if (skin === 'galaxia') updateGalaxia();
+      if (skin === 'hacker') updateHacker();
+
+      if (powerActive && Date.now() > powerActive.expire) clearActivePower();
+    }
+
+    function loop(){
+      if (!running) return;
+      update();
+      draw();
+      animationId = requestAnimationFrame(loop);
+    }
+
+    function endGame(text){
+      running = false;
+      paused = false;
+      cancelAnimationFrame(animationId);
+      if (!survivalMode){
+        gameOverText.textContent = text + ' — Punts ' + playerScore + ' / ' + opponentScore + '. Premeu "Reinicia" per jugar de nou.';
+      } else {
+        gameOverText.textContent = text + ' — Premeu "R" per reiniciar.';
+      }
+      overlay.style.display = 'flex';
+      overlay.style.pointerEvents = 'none';
+      // cleanup intervals
+      stopSurvivalMode();
+      if (powerIntervalId) { clearInterval(powerIntervalId); powerIntervalId = null; }
+      // show start overlay again
+      if (startBigOverlay){
+        startBigOverlay.style.display = 'flex';
+        startBigOverlay.style.pointerEvents = 'auto';
+        canvas.classList.add('dim-canvas');
+        applyBigOverlaySkin(skin);
+      }
+    }
+
+    // Input
+    window.addEventListener('keydown', (e)=>{
+      const k = e.key;
+      // iniciar con espacio
+      if (e.code === 'Space') {
+        if (!running) {
+          // preparar intervalos según modo antes de empezar
+          ensurePowerInterval();
+          if (gameModeEl.value === 'survival') startSurvivalMode();
+          // ocultar cartel y arrancar
+          if (startBigOverlay) { startBigOverlay.style.display = 'none'; startBigOverlay.style.pointerEvents = 'none'; }
+          canvas.classList.remove('dim-canvas');
+          startGame();
+          e.preventDefault();
+          return;
+        }
+      }
+      // Flechas: siempre controlan la pala izquierda (no cambian entre modos)
+      if (k === 'ArrowUp'){ player.dy = -paddleSpeed; e.preventDefault(); }
+      else if (k === 'ArrowDown'){ player.dy = paddleSpeed; e.preventDefault(); }
+
+      // NUEVO: controles para segundo jugador sólo si multijugador activado
+      if (multiplayerEnabled){
+        if (k === 'w' || k === 'W') { opponent.dy = -paddleSpeed; e.preventDefault(); }
+        else if (k === 's' || k === 'S') { opponent.dy = paddleSpeed; e.preventDefault(); }
+      }
+
+      // Pausa / reinicio siguen iguales
+      if (k.toLowerCase() === 'p'){
+        paused = !paused;
+        if (paused){
+          gameOverText.textContent = 'Pausat — Premeu "P" per reprendre';
+          overlay.style.display = 'flex';
+          overlay.style.pointerEvents = 'none';
+          cancelAnimationFrame(animationId);
+        } else {
+          overlay.style.display = 'none';
+          loop();
+        }
+        e.preventDefault();
+      } else if (k.toLowerCase() === 'r'){
+        // restart current mode: show start overlay and reset
+        if (startBigOverlay){ startBigOverlay.style.display = 'flex'; startBigOverlay.style.pointerEvents = 'auto'; }
+        canvas.classList.add('dim-canvas');
+        running = false;
+        paused = false;
+        if (powerIntervalId) { clearInterval(powerIntervalId); powerIntervalId = null; }
+        stopSurvivalMode();
+        applyBigOverlaySkin(skinEl.value);
+        resetBall('player');
+        updateScore();
+      }
+    });
+    window.addEventListener('keyup', (e)=>{
+      // stop player movement
+      if ((e.key === 'ArrowUp' && player.dy < 0) || (e.key === 'ArrowDown' && player.dy > 0)) player.dy = 0;
+      // stop opponent movement if multijugador
+      if (multiplayerEnabled){
+        if ((e.key === 'w' || e.key === 'W') && opponent.dy < 0) opponent.dy = 0;
+        if ((e.key === 's' || e.key === 'S') && opponent.dy > 0) opponent.dy = 0;
+      }
+    });
+
+    // mouse wheel to move paddle (solo afecta al jugador izquierdo, no cambia para otros modos)
+    canvas.addEventListener('wheel', (e)=>{
+      e.preventDefault();
+      if (!running || paused) return;
+      const sensitivity = 0.27;
+      player.y += e.deltaY * sensitivity;
+      player.y = clamp(player.y, 0, H - player.h);
+    }, { passive: false });
+
+    // NUEVO: actualizar estado multijugador desde checkbox
+    multiplayerCheckbox.addEventListener('change', (e)=>{
+      multiplayerEnabled = !!e.target.checked;
+      // si se desactiva, asegurar que opponent.dy se ponga a 0 y AI retome el control
+      if (!multiplayerEnabled) opponent.dy = 0;
+      // mostrar pista rápida
+      const hint = document.querySelector('.msg');
+      if (hint) {
+        hint.textContent = multiplayerEnabled ? 'Multijugador — Jugador A: Flechas · Jugador B: W/S' : 'Punts fins a 11 — Fletxes amunt/avall per moure';
+      }
+    });
+
+    // Difficulty change
+    difficultyEl.addEventListener('change', (e)=>{
+      applyDifficulty(e.target.value);
+      if (ball){
+        const currentSpeed = Math.hypot(ball.vx, ball.vy) || 1;
+        const ratio = ballBaseSpeed / currentSpeed;
+        ball.vx *= ratio; ball.vy *= ratio;
+      }
+    });
+
+    // Skin change: actualizar aspecto del cartel grande también
+    skinEl.addEventListener('change', (e)=>{
+      skin = e.target.value;
+      if (skin === 'galaxia') initGalaxia();
+      if (skin === 'hacker') initHacker();
+      applyBigOverlaySkin(skin);
+      draw();
+    });
+
+    // Game mode change
+    gameModeEl.addEventListener('change', (e)=>{
+      if (e.target.value === 'survival') startSurvivalMode();
+      else stopSurvivalMode();
+      ensurePowerInterval();
+      updateScore();
+    });
+
+    restartBtn.addEventListener('click', ()=>{ 
+      if (startBigOverlay){ startBigOverlay.style.display = 'flex'; startBigOverlay.style.pointerEvents = 'auto'; }
+      canvas.classList.add('dim-canvas');
+      running = false;
+      paused = false;
+      if (powerIntervalId) { clearInterval(powerIntervalId); powerIntervalId = null; }
+      stopSurvivalMode();
+      applyBigOverlaySkin(skinEl.value);
+      resetBall('player');
+      updateScore();
+    });
+
+    // Estado inicial: mostrar cartel grande y dibujar primer frame (no arrancar loop)
+    applyDifficulty(difficultyEl.value);
+    skin = skinEl.value;
+    if (skin === 'galaxia') initGalaxia();
+    if (skin === 'hacker') initHacker();
+    applyBigOverlaySkin(skin);
+    canvas.classList.add('dim-canvas');
+    resetBall('player');
+    updateScore();
+    draw();
+
+    // cleanup
+    window.addEventListener('beforeunload', ()=>{
+      if (powerIntervalId) clearInterval(powerIntervalId);
+      if (survivalSpeedIntervalId) clearInterval(survivalSpeedIntervalId);
+    });
+  </script>
+</body>
+</html>

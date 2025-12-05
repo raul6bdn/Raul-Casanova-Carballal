@@ -1,0 +1,327 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Joc de Curses - Cotxe</title>
+  <style>
+    :root{--bg:#2b2b2b;--road:#333;--line:#e6e6e6;--car:#ff5c5c;--ob:#2aa198}
+    html,body{height:100%;margin:0;font-family:system-ui,Segoe UI,Roboto,"Helvetica Neue",Arial}
+    body{display:flex;align-items:center;justify-content:center;background:linear-gradient(180deg,#0b1220 0%, #0f1724 100%);color:#fff}
+    .wrap{width:420px;max-width:95%;padding:16px;text-align:center}
+    h1{font-size:18px;margin:6px 0 12px}
+    canvas{display:block;background:var(--road);width:100%;height:auto;border-radius:8px;box-shadow:0 8px 20px rgba(0,0,0,.6)}
+    .hud{display:flex;justify-content:space-between;align-items:center;margin:10px 0;font-size:14px}
+    .hint{font-size:13px;color:#cfd8dc}
+    .overlay{position:absolute;left:0;top:0;width:100%;height:100%;display:flex;align-items:center;justify-content:center;pointer-events:none}
+    .centerBox{background:rgba(0,0,0,.6);padding:12px 16px;border-radius:8px;pointer-events:auto}
+    button{background:#1f2937;border:0;color:#fff;padding:8px 12px;border-radius:6px;cursor:pointer}
+    button:active{transform:translateY(1px)}
+    .footer{margin-top:8px;font-size:12px;color:#9aa7b2}
+  </style>
+  <audio id="explosion-sound" preload="auto">
+    <source src="https://cdn.pixabay.com/audio/2022/10/16/audio_12b5b7b6e2.mp3" type="audio/mpeg">
+    <!-- Fuente: Pixabay, dominio público -->
+  </audio>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Joc de Curses — Controls: ◀ ▶</h1>
+    <div class="hud">
+      <div>Puntuació: <strong id="score">0</strong></div>
+      <div id="level">Velocitat: 1</div>
+    </div>
+    <div style="position:relative">
+      <canvas id="game" width="400" height="600"></canvas>
+      <div id="ui" class="overlay" style="display:none;"></div>
+    </div>
+    <div class="hint" id="hint">Evita els obstacles. El joc s'accelera amb el temps.<br><span style='color:#ffd700'>Prem qualsevol tecla, clic o toca la pantalla abans de jugar per activar el so.</span></div>
+    <div class="footer">Click sobre el canvas o prem <kbd>Enter</kbd> per reiniciar després d'un Game Over.</div>
+  </div>
+
+  <script>
+  (function(){
+    const canvas = document.getElementById('game');
+    const ctx = canvas.getContext('2d');
+    const ui = document.getElementById('ui');
+    const scoreEl = document.getElementById('score');
+    const levelEl = document.getElementById('level');
+
+    const W = canvas.width; const H = canvas.height;
+
+    // Player
+    const car = {w:50,h:80,x:(W-50)/2,y:H-100,speed:0,moveSpeed:6}
+
+    let keys = {left:false,right:false};
+    let obstacles = [];
+    let running = true;
+    let gameOver = false;
+    let score = 0;
+
+    // Difficulty & timing
+    let baseSpeed = 2.0; // obstacle vertical speed multiplier
+    // Aumentamos la tasa de subida de velocidad para que el juego se vuelva más rápido más pronto
+    let speedIncreaseRate = 0.12; // how much baseSpeed increases per second (was 0.02)
+    let spawnInterval = 1000; // ms between spawns (will decrease)
+    let minSpawn = 350; // minimum spawn interval
+    let spawnTimer = 0;
+
+    // Time tracking
+    let lastTime = performance.now();
+
+    function reset(){
+      obstacles = [];
+      baseSpeed = 2.0;
+      spawnInterval = 1000;
+      spawnTimer = 0;
+      score = 0;
+      gameOver = false;
+      car.x = (W-car.w)/2;
+      ui.style.display = 'none';
+      running = true;
+      lastTime = performance.now();
+      loop(lastTime);
+    }
+
+    function spawnObstacle(){
+      // Coches enemigos con colores realistas
+      const width = 60 + Math.random()*40; // 60-100
+      const h = 45 + Math.random()*35; // 45-80 (car-like height)
+      const x = Math.max(14, Math.min(W-width-14, Math.random()*(W-width)));
+      // Colores típicos de coches
+      const colors = [
+        '#2d2d2d', // negro
+        '#7b8a8b', // gris
+        '#c0c0c0', // plata
+        '#1e3a5c', // azul oscuro
+        '#3b5998', // azul
+        '#b71c1c', // rojo oscuro
+        '#d32f2f', // rojo
+        '#455a64', // gris azulado
+        '#fafafa', // blanco
+        '#2e7d32', // verde oscuro
+        '#795548', // marrón
+        '#37474f'  // gris grafito
+      ];
+      const color = colors[Math.floor(Math.random()*colors.length)];
+      obstacles.push({x, y:-h, w:width, h:h, color});
+    }
+
+    // Dibujar un coche (usado por jugador y obstáculos)
+    function drawCarShape(ctx, x, y, w, h, color, details = true){
+      // body
+      ctx.fillStyle = color;
+      roundRect(ctx, x, y, w, h, Math.min(8, w*0.08), true, false);
+      // roof / cabin
+      const roofW = w*0.55, roofH = h*0.35;
+      const roofX = x + (w-roofW)/2, roofY = y + h*0.08;
+      ctx.fillStyle = shadeColor(color, -8);
+      roundRect(ctx, roofX, roofY, roofW, roofH, 6, true, false);
+      if(details){
+        // windows
+        ctx.fillStyle = 'rgba(255,255,255,0.7)';
+        const winW = roofW*0.9, winH = roofH*0.55;
+        ctx.fillRect(roofX + (roofW-winW)/2, roofY + (roofH-winH)/2, winW, winH);
+        // wheels
+        ctx.fillStyle = '#111';
+        const wheelW = Math.max(8, w*0.14), wheelH = Math.max(6, h*0.12);
+        ctx.fillRect(x + 8, y + h - wheelH - 6, wheelW, wheelH);
+        ctx.fillRect(x + w - wheelW - 8, y + h - wheelH - 6, wheelW, wheelH);
+        // headlights for player car (slightly brighter)
+        ctx.fillStyle = 'rgba(255,255,180,0.9)';
+        ctx.fillRect(x + 4, y + h - wheelH - 18, 6, 4);
+        ctx.fillRect(x + w - 10, y + h - wheelH - 18, 6, 4);
+      }
+    }
+
+    // Utility to slightly darken/lighten a hex color
+    function shadeColor(hex, percent) {
+      // hex like #rrggbb
+      const num = parseInt(hex.replace('#',''),16);
+      const r = Math.min(255, Math.max(0, (num>>16) + percent));
+      const g = Math.min(255, Math.max(0, ((num>>8)&0x00FF) + percent));
+      const b = Math.min(255, Math.max(0, (num&0x0000FF) + percent));
+      return '#' + ( (1<<24) + (r<<16) + (g<<8) + b ).toString(16).slice(1);
+    }
+
+    function update(dt){
+      if(gameOver) return;
+
+      // Controls
+      if(keys.left) car.x -= car.moveSpeed;
+      if(keys.right) car.x += car.moveSpeed;
+      // Bound
+      car.x = Math.max(6, Math.min(W-car.w-6, car.x));
+
+      // Update spawn timer
+      spawnTimer += dt;
+      if(spawnTimer >= spawnInterval){
+        spawnTimer = 0;
+        spawnObstacle();
+      }
+
+      // Move obstacles
+      const v = baseSpeed * 60/1000; // pixels per ms scaled
+      for(const ob of obstacles){
+        ob.y += v * dt * 60/30; // scale to balanced speed
+      }
+
+      // Remove offscreen and increase score
+      for(let i=obstacles.length-1;i>=0;i--){
+        if(obstacles[i].y > H+50){ obstacles.splice(i,1); score += 10; }
+      }
+
+      // Increase difficulty over time
+      baseSpeed += speedIncreaseRate * (dt/1000);
+      spawnInterval = Math.max(minSpawn, spawnInterval - 0.5*(dt/1000));
+
+      // Score slowly increases with time
+      score += dt*0.01;
+
+      // Collision detection
+      for(const ob of obstacles){
+        if(rectIntersect(car.x,car.y,car.w,car.h, ob.x,ob.y,ob.w,ob.h)){
+          endGame();
+          return;
+        }
+      }
+
+      // Update HUD
+      scoreEl.textContent = Math.floor(score);
+      levelEl.textContent = 'Velocitat: ' + (baseSpeed).toFixed(1);
+    }
+
+    function rectIntersect(x1,y1,w1,h1,x2,y2,w2,h2){
+      return x1 < x2 + w2 && x1 + w1 > x2 && y1 < y2 + h2 && y1 + h1 > y2;
+    }
+
+    function draw(){
+      // clear
+      ctx.clearRect(0,0,W,H);
+
+      // road background
+      ctx.fillStyle = '#3a3a3a';
+      ctx.fillRect(0,0,W,H);
+
+      // side lines
+      ctx.fillStyle = '#222'; ctx.fillRect(0,0,10,H); ctx.fillRect(W-10,0,10,H);
+
+      // center dashed line
+      ctx.strokeStyle = '#e6e6e6'; ctx.lineWidth = 6; ctx.setLineDash([20,20]);
+      ctx.beginPath(); ctx.moveTo(W/2,0); ctx.lineTo(W/2,H); ctx.stroke(); ctx.setLineDash([]);
+
+      // draw player car with more details
+      drawCarShape(ctx, car.x, car.y, car.w, car.h, '#ff5c5c', true);
+
+      // draw obstacles como coches realistas (más detalles)
+      for(const ob of obstacles){
+        drawCarShape(ctx, ob.x, ob.y, ob.w, ob.h, ob.color, true);
+        // detalles extra: ventanas laterales, luces traseras
+        // Ventanas laterales
+        ctx.fillStyle = 'rgba(220,220,220,0.7)';
+        ctx.fillRect(ob.x + ob.w*0.12, ob.y + ob.h*0.18, ob.w*0.25, ob.h*0.22);
+        ctx.fillRect(ob.x + ob.w*0.63, ob.y + ob.h*0.18, ob.w*0.25, ob.h*0.22);
+        // Luces traseras
+        ctx.fillStyle = '#ff4444';
+        ctx.fillRect(ob.x + 6, ob.y + ob.h - 10, 8, 4);
+        ctx.fillRect(ob.x + ob.w - 14, ob.y + ob.h - 10, 8, 4);
+      }
+
+      if(gameOver){
+        ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.fillRect(0,0,W,H);
+      }
+    }
+
+    function roundRect(ctx,x,y,w,h,r,fill,stroke){
+      if (typeof r === 'undefined') r = 5;
+      ctx.beginPath(); ctx.moveTo(x+r,y);
+      ctx.arcTo(x+w,y,x+w,y+h,r); ctx.arcTo(x+w,y+h,x,y+h,r); ctx.arcTo(x,y+h,x,y,r); ctx.arcTo(x,y,x+w,y,r);
+      ctx.closePath(); if(fill) ctx.fill(); if(stroke) ctx.stroke();
+    }
+
+    // Mostrar instrucción de interacción si es la primera vez
+    let firstInteraction = false;
+    let audioUnlocked = false;
+    function unlockAudio() {
+      if (!audioUnlocked) {
+        const snd = document.getElementById('explosion-sound');
+        // Intenta reproducir y pausar inmediatamente
+        try {
+          snd.volume = 0.8;
+          snd.currentTime = 0;
+          snd.play().then(()=>{ snd.pause(); snd.currentTime=0; });
+        } catch(e){}
+        audioUnlocked = true;
+        // Oculta la instrucción
+        const hint = document.getElementById('hint');
+        if(hint) hint.innerHTML = "Evita els obstacles. El joc s'accelera amb el temps.";
+      }
+    }
+    window.addEventListener('keydown', unlockAudio, {once:true});
+    window.addEventListener('mousedown', unlockAudio, {once:true});
+    window.addEventListener('touchstart', unlockAudio, {once:true});
+
+    function endGame(){
+      gameOver = true; running = false;
+      // Sonido de explosión: solo si el audio está desbloqueado
+      try {
+        const snd = document.getElementById('explosion-sound');
+        if(audioUnlocked) {
+          snd.pause();
+          snd.currentTime = 0;
+          snd.volume = 0.8;
+          snd.play();
+        }
+      } catch(e){}
+      showGameOver();
+    }
+
+    function showGameOver(){
+      ui.innerHTML = '';
+      const box = document.createElement('div'); box.className='centerBox';
+      const title = document.createElement('div'); title.style.fontSize='18px'; title.style.marginBottom='8px'; title.textContent='Game Over';
+      const txt = document.createElement('div'); txt.style.marginBottom='8px'; txt.textContent = 'Puntuació: ' + Math.floor(score);
+      const btn = document.createElement('button'); btn.textContent='Reiniciar'; btn.onclick = reset;
+      box.appendChild(title); box.appendChild(txt); box.appendChild(btn);
+      ui.appendChild(box);
+      ui.style.display = 'flex';
+    }
+
+    // Main loop
+    function loop(now){
+      if(!running) return;
+      const dt = Math.min(40, now - lastTime); // cap dt to avoid big jumps
+      lastTime = now;
+      update(dt);
+      draw();
+      if(!gameOver) requestAnimationFrame(loop);
+    }
+
+    // Input
+    window.addEventListener('keydown', (e)=>{
+      if(e.key === 'ArrowLeft'){ keys.left = true; e.preventDefault(); }
+      if(e.key === 'ArrowRight'){ keys.right = true; e.preventDefault(); }
+      if(e.key === 'Enter' && gameOver) reset();
+    });
+    window.addEventListener('keyup', (e)=>{
+      if(e.key === 'ArrowLeft'){ keys.left = false; }
+      if(e.key === 'ArrowRight'){ keys.right = false; }
+    });
+
+    // Click/touch to restart if game over
+    canvas.addEventListener('click', ()=>{ if(gameOver) reset(); else { /* give focus for keys */ } });
+
+    // Start
+    // Position car vertically
+    car.y = H - car.h - 20;
+    // initial spawn
+    spawnObstacle();
+    lastTime = performance.now();
+    loop(lastTime);
+
+    // Expose for debugging
+    window._game = {reset};
+  })();
+  </script>
+</body>
+</html>
